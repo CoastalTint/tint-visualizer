@@ -58,11 +58,18 @@ const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
 // the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
 const STRIP_FRACTION = 0.25;
-const CTV_BUILD = 'v4-strip25';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+const CTV_BUILD = 'v5-strip-visible';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
 // Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
 // and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
 const STRIP_SHOW_MAX_VLT = 15;
 const STRIP_LIFT = 0.003;   // m the strip sits off the glass, toward the outside
+// v5 look. The cabin behind the glass is dark, so a dark strip over darkish clear glass reads as one dark windshield.
+// Film: near-black and nearly opaque (0.90 at 15%, 0.95 at 5%) with a faint gloss so it still reads as glass.
+const STRIP_MIN_OPACITY = 0.9;
+// Clear (untinted) windshield: a faint pale-sky reflection layer, so the glass below the strip looks lighter
+// than the film. Used only for the windshield's untinted part (strip / clear modes); 'full' uses the normal VLT curve.
+const CLEAR_WS_SKY = [0.58, 0.66, 0.76], CLEAR_WS_OPACITY = 0.3;
+const STRIP_EDGE_W = 0.007;   // m, a thin, slightly lighter line along the strip's lower edge (film edge)
 
 const POPULAR_MAKES = ['Acura', 'Audi', 'BMW', 'Buick', 'Cadillac', 'Chevrolet', 'Chrysler', 'Dodge', 'Ford', 'Genesis', 'GMC',
   'Honda', 'Hyundai', 'Infiniti', 'Jeep', 'Kia', 'Lexus', 'Lincoln', 'Mazda', 'Mercedes-Benz', 'Mini', 'Mitsubishi', 'Nissan',
@@ -308,6 +315,12 @@ function mount(root) {
     m.envMapIntensity = 0.35 + 0.65 * f;
     m.needsUpdate = true;
   }
+  function applyClearWindshield(m) {
+    m.opacity = CLEAR_WS_OPACITY;
+    m.color.setRGB(CLEAR_WS_SKY[0], CLEAR_WS_SKY[1], CLEAR_WS_SKY[2], T.LinearSRGBColorSpace);
+    m.specularIntensity = 1; m.envMapIntensity = 1;
+    m.needsUpdate = true;
+  }
   function paintGlass() {
     if (!current || !T) return;
     const p = current.panes;
@@ -320,13 +333,16 @@ function mount(root) {
     const ws = current.ws;
     if (ws) {
       const mode = state.windshieldMode;
-      applyVLT(ws.main.material, mode === 'full' ? state.vlt.windshield : CLEAR_VLT);
+      if (mode === 'full') applyVLT(ws.main.material, state.vlt.windshield);
+      else applyClearWindshield(ws.main.material);
       ws.main.material.clippingPlanes = mode === 'strip' ? [ws.belowPlane] : null;
       ws.strip.visible = mode === 'strip';
       const sm = ws.strip.material;
       applyVLT(sm, Math.min(state.vlt.windshield, STRIP_SHOW_MAX_VLT));
       // Film on the glass knocks back the sky sheen; without this the grazing-angle reflection washes the band out.
-      sm.specularIntensity *= 0.15; sm.envMapIntensity *= 0.2;
+      sm.opacity = Math.max(sm.opacity, STRIP_MIN_OPACITY);
+      sm.specularIntensity = 0.1; sm.envMapIntensity = 0.1;   // subtle gloss, not enough to wash the band out
+      if (ws.edge) ws.edge.visible = mode === 'strip';
     }
     dirty = true;
   }
@@ -502,7 +518,15 @@ function mount(root) {
       const wq = new T.Quaternion(), ws_ = new T.Vector3();
       w.matrixWorld.decompose(new T.Vector3(), wq, ws_);
       strip.position.copy(out.clone().multiplyScalar(STRIP_LIFT).applyQuaternion(wq.clone().invert()).divide(ws_));
-      entry.ws = { main: w, strip, belowPlane: new T.Plane(up.clone().negate(), cut),
+      // Film edge: a very thin, slightly lighter line just below the strip so its lower edge reads crisply.
+      const edge = new T.Mesh(w.geometry, new T.MeshBasicMaterial({ color: 0xc9d3dc, transparent: true, opacity: 0.55,
+        depthWrite: false, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+      edge.name = 'glass_windshield_strip_edge';
+      edge.renderOrder = 5; edge.castShadow = false;
+      edge.material.clippingPlanes = [new T.Plane(up.clone().negate(), cut), new T.Plane(up.clone(), -(cut - STRIP_EDGE_W))];
+      edge.position.copy(strip.position);
+      w.add(edge);
+      entry.ws = { main: w, strip, edge, belowPlane: new T.Plane(up.clone().negate(), cut),
         cut: { fraction: STRIP_FRACTION, glassLen: +glassLen.toFixed(3), depth: +depth.toFixed(3), normal: up.toArray().map((n) => +n.toFixed(3)) } };
     }
     return entry;
