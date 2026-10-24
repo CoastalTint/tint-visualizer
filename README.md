@@ -96,7 +96,7 @@ With all windows at 20% the same link also has `vlt=20` (after `sunroof`).
 
   Tabs for groups a model lacks are hidden.
 - **Windshield** modes:
-  - Top strip (default): a sun strip covering the top 16% of the windshield, measured along the glass down its centre line (about 5–6 inches on a real windshield), gets the chosen VLT and the rest stays clear. The same fraction is used on all six models. The strip's lower edge is a cut by a plane square to the glass (not an offset from the curved top edge), so it reads as a nearly straight line with only the gentle curve of the glass. It is done with a clipped clone of the pane.
+  - Top strip (default): a sun strip covering the top 25% of the windshield, measured along the glass down its centre line (about 8–9 inches on a real windshield), gets the chosen VLT and the rest stays clear. The same fraction is used on all six models. The strip's lower edge is a cut by a plane square to the glass (not an offset from the curved top edge), so it reads as a nearly straight line with only the gentle curve of the glass. It is done with a clipped clone of the pane.
   - Full.
   - Clear.
 - **Tint curve**: opacity = 1 − VLT/100 (max 0.97) on a dark tinted physical glass material, with reflections. Presets are 5/15/20/35/50/75%, matching the CRM's shades; the slider goes 5–90%.

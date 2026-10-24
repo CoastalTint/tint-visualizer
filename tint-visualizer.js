@@ -56,8 +56,13 @@ function snapShade(v) {
 const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
   ['utm_source', 'website'], ['utm_medium', 'visualizer'], ['utm_campaign', 'tint-visualizer']];
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
-// the same for every body. 0.16 ~ a 5-6 in strip on a typical 32-36 in windshield.
-const STRIP_FRACTION = 0.16;
+// the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
+const STRIP_FRACTION = 0.25;
+const CTV_BUILD = 'v4-strip25';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+// Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
+// and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
+const STRIP_SHOW_MAX_VLT = 15;
+const STRIP_LIFT = 0.003;   // m the strip sits off the glass, toward the outside
 
 const POPULAR_MAKES = ['Acura', 'Audi', 'BMW', 'Buick', 'Cadillac', 'Chevrolet', 'Chrysler', 'Dodge', 'Ford', 'Genesis', 'GMC',
   'Honda', 'Hyundai', 'Infiniti', 'Jeep', 'Kia', 'Lexus', 'Lincoln', 'Mazda', 'Mercedes-Benz', 'Mini', 'Mitsubishi', 'Nissan',
@@ -318,7 +323,10 @@ function mount(root) {
       applyVLT(ws.main.material, mode === 'full' ? state.vlt.windshield : CLEAR_VLT);
       ws.main.material.clippingPlanes = mode === 'strip' ? [ws.belowPlane] : null;
       ws.strip.visible = mode === 'strip';
-      applyVLT(ws.strip.material, state.vlt.windshield);
+      const sm = ws.strip.material;
+      applyVLT(sm, Math.min(state.vlt.windshield, STRIP_SHOW_MAX_VLT));
+      // Film on the glass knocks back the sky sheen; without this the grazing-angle reflection washes the band out.
+      sm.specularIntensity *= 0.15; sm.envMapIntensity *= 0.2;
     }
     dirty = true;
   }
@@ -481,11 +489,19 @@ function mount(root) {
       const glassLen = up.length(); up.normalize();
       const depth = glassLen * STRIP_FRACTION;
       const cut = up.dot(top) - depth;                     // keep up . p > cut
+      // Outward glass normal (square to "up", pointing to the front of the car).
+      const out = new T.Vector3(0, up.z, -up.y); if (out.z < 0) out.negate();
       const strip = new T.Mesh(w.geometry, w.material.clone());
       strip.name = 'glass_windshield_strip';
-      strip.renderOrder = 3; strip.castShadow = false;
+      // Drawn after the windshield and on its outer face: lifted a few mm outward, pulled forward in depth so seals,
+      // the roof edge and A-pillar trim that meet the glass can't swallow it, and no depth writes (no z-fighting).
+      strip.renderOrder = 4; strip.castShadow = false;
+      Object.assign(strip.material, { depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
       strip.material.clippingPlanes = [new T.Plane(up.clone(), -cut)];
       w.add(strip);   // same transform as the windshield (geometry is local to it)
+      const wq = new T.Quaternion(), ws_ = new T.Vector3();
+      w.matrixWorld.decompose(new T.Vector3(), wq, ws_);
+      strip.position.copy(out.clone().multiplyScalar(STRIP_LIFT).applyQuaternion(wq.clone().invert()).divide(ws_));
       entry.ws = { main: w, strip, belowPlane: new T.Plane(up.clone().negate(), cut),
         cut: { fraction: STRIP_FRACTION, glassLen: +glassLen.toFixed(3), depth: +depth.toFixed(3), normal: up.toArray().map((n) => +n.toFixed(3)) } };
     }
@@ -771,6 +787,7 @@ function mount(root) {
 
   /* ---------- public API (handy for testing / site scripts) ---------- */
   Object.assign(api, {
+    build: CTV_BUILD, stripFraction: STRIP_FRACTION,
     state, setBody, setTint, selectGroup, setWindshieldMode,
     quoteHref: () => cta.href, quoteParams: () => Object.fromEntries(quoteParams()),
     bodyFromBodyClass, inferBodyClass,
