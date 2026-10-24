@@ -7,8 +7,12 @@
  *   data-asset-base   folder that holds sedan.glb … van.glb (default: ./models/ next to this file)
  *   data-quote-url    CTA link (default: /contact/). The customer's selection is appended as query
  *                     params (vehicle, year, make, model, vin, body, windshield (Full mode only),
- *                     vlt_sunstrip (Top strip mode only), front, rear, back, sunroof, vlt when all sent
- *                     window shades match, service=tint, source=tint-visualizer, utm_*);
+ *                     vlt_sunstrip (Top strip mode only), front, rear, back, sunroof (only when a
+ *                     sunroof type other than 'No sunroof' is chosen), sunroof_type
+ *                     (none|normal|panoramic|model_x_panoramic, always sent; Model X panoramic is offered
+ *                     only for a Tesla Model X), vlt (only with a Clear windshield, when all sent
+ *                     window shades match),
+ *                     service=tint, source=tint-visualizer, utm_*);
  *                     shades are snapped to the CRM's 5/15/20/35/50/75. A different-origin URL
  *                     opens in a new tab.
  *   data-sticky-top   px height of the site's fixed header (default: measured from the page)
@@ -58,12 +62,17 @@ function snapShade(v) {
 // full-windshield add-on, so it is sent ONLY in Full mode. Top strip mode sends this param instead, with the
 // snapped strip shade as a bare number (e.g. vlt_sunstrip=15). Clear mode sends neither.
 const SUNSTRIP_PARAM = 'vlt_sunstrip';
+// Sunroof type (the CRM prices them differently: normal $100, panoramic $250, Model X panoramic incl. the falcon-door
+// tops $350). Always sent as sunroof_type; the `sunroof` shade is sent only when the type is not 'none'.
+const SUNROOF_TYPE_PARAM = 'sunroof_type';
+const SUNROOF_TYPES = [['none', 'No sunroof'], ['normal', 'Normal'], ['panoramic', 'Panoramic'], ['model_x_panoramic', 'Model X panoramic']];
+const isModelX = (make, model) => /^tesla$/i.test(String(make || '').trim()) && /model\s*x/i.test(String(model || ''));
 const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
   ['utm_source', 'website'], ['utm_medium', 'visualizer'], ['utm_campaign', 'tint-visualizer']];
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
 // the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
 const STRIP_FRACTION = 0.25;
-const CTV_BUILD = 'v7-vlt-clear-only';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+const CTV_BUILD = 'v8-sunroof-type';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
 // Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
 // and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
 const STRIP_SHOW_MAX_VLT = 15;
@@ -218,6 +227,7 @@ function mount(root) {
 
   const state = {
     body: 'sedan', group: 'all', windshieldMode: 'none',
+    sunroofType: 'none', sunroofTypeByUser: false,   // set true once the customer taps a sunroof-type pill
     vlt: { windshield: DEFAULT_VLT, front: DEFAULT_VLT, rear: DEFAULT_VLT, back: DEFAULT_VLT, sunroof: DEFAULT_VLT },
     year: '', make: '', model: '', vin: '', bodyClass: '', bodySource: 'default',
   };
@@ -280,6 +290,11 @@ function mount(root) {
     h('span', { class: 'ctv-small' }, 'Windshield:'),
     [['strip', 'Top strip'], ['full', 'Full'], ['none', 'Clear']].map(([k, l]) => (wsModeBtns[k] = h('button', { type: 'button', class: 'ctv-pill ctv-pill-sm',
       'aria-pressed': 'false', 'data-wsmode': k, onclick: () => setWindshieldMode(k) }, l))));
+  const srTypeBtns = {};
+  const srRow = h('div', { class: 'ctv-wsmode ctv-srtype', role: 'group', 'aria-label': 'Sunroof type' },
+    h('span', { class: 'ctv-small' }, 'Sunroof:'),
+    SUNROOF_TYPES.map(([k, l]) => (srTypeBtns[k] = h('button', { type: 'button', class: 'ctv-pill ctv-pill-sm',
+      'aria-pressed': 'false', 'data-srtype': k, onclick: () => setSunroofType(k, true) }, l))));
   const legal = h('p', { class: 'ctv-note' }, 'California limits tint on the windshield and front side windows. Check current CA law, or ask us what fits your vehicle.');
 
   const panel = h('div', { class: 'ctv-panel' },
@@ -295,6 +310,7 @@ function mount(root) {
       slider,
       h('div', { class: 'ctv-presets', role: 'group', 'aria-label': 'Preset shades' }, presetBtns),
       wsRow,
+      srRow,
       h('p', { class: 'ctv-small' }, 'VLT = visible light transmission. Lower % = darker.'),
       legal));
 
@@ -332,6 +348,11 @@ function mount(root) {
     for (const g of GROUP_KEYS) {
       for (const n of GROUPS[g]) {
         if (!p[n] || n === 'glass_windshield') continue;
+        if (g === 'sunroof') {   // no sunroof: hide the glass and show the body-paint panel (clear glass if there is no panel)
+          const none = state.sunroofType === 'none';
+          if (current.srCover) { current.srCover.visible = none; p[n].visible = !none; }
+          if (none && !current.srCover) { applyClearWindshield(p[n].material); continue; }
+        }
         applyVLT(p[n].material, state.vlt[g]);
       }
     }
@@ -466,8 +487,10 @@ function mount(root) {
     const car = gltf.scene;
     car.name = 'ctv_' + body;
     const panes = {};
+    let paint = null, entry_sunroofCover = null;
     car.traverse((o) => {
       if (!o.isMesh) return;
+      if (!paint && o.material && o.material.name === 'mat_body_paint') paint = o.material;
       o.castShadow = true; o.receiveShadow = false;
       if (ALL_PANES.indexOf(o.name) >= 0) {
         const src = o.material;
@@ -480,11 +503,22 @@ function mount(root) {
         o.material.depthWrite = false; o.renderOrder = 1;
       }
     });
+    // 'No sunroof': a body-paint panel in the sunroof opening (same geometry and transform as the glass), shown
+    // instead of the glass so the roof reads as solid metal.
+    const sr = panes.glass_sunroof;
+    if (sr && paint && sr.parent) {
+      const cover = new T.Mesh(sr.geometry, paint.clone());
+      cover.material.side = T.DoubleSide;
+      cover.name = 'glass_sunroof_cover'; cover.castShadow = false; cover.visible = false;
+      cover.position.copy(sr.position); cover.quaternion.copy(sr.quaternion); cover.scale.copy(sr.scale);
+      sr.parent.add(cover);
+      entry_sunroofCover = cover;
+    }
     const box = new T.Box3().setFromObject(car);
     const size = box.getSize(new T.Vector3()), center = box.getCenter(new T.Vector3());
     const entry = { scene: car, panes, body, size, box,
       target: new T.Vector3(center.x, box.min.y + size.y * 0.42, center.z),
-      radius: Math.max(size.x, size.z) * 0.5 * 1.08 + 0.15, ws: null };
+      radius: Math.max(size.x, size.z) * 0.5 * 1.08 + 0.15, ws: null, srCover: entry_sunroofCover };
     const w = panes.glass_windshield;
     if (w) {
       w.updateWorldMatrix(true, false);
@@ -615,11 +649,17 @@ function mount(root) {
       let txt = gv == null ? 'mixed' : gv + '%';
       if (g === 'windshield' && state.windshieldMode === 'strip') txt = gv + '% strip';
       if (g === 'windshield' && state.windshieldMode === 'none') txt = 'clear';
+      if (g === 'sunroof' && state.sunroofType === 'none') txt = 'none';
       groupBtns[g].querySelector('.ctv-tab-v').textContent = txt;
     }
     for (const k in wsModeBtns) wsModeBtns[k].setAttribute('aria-pressed', String(k === state.windshieldMode));
     wsRow.hidden = !(state.group === 'windshield' || state.group === 'all');
-    root.setAttribute('data-vlt', JSON.stringify(state.vlt) + '|' + state.windshieldMode);
+    const mx = isModelX(state.make, state.model);
+    srTypeBtns.model_x_panoramic.hidden = !mx;
+    for (const k in srTypeBtns) srTypeBtns[k].setAttribute('aria-pressed', String(k === state.sunroofType));
+    // Sunroof tab only (on 'All windows' it would push the desktop panel past an 800px screen; the tab label shows 'none')
+    srRow.hidden = state.group !== 'sunroof' || (current && groupsPresent().indexOf('sunroof') < 0);
+    root.setAttribute('data-vlt', JSON.stringify(state.vlt) + '|' + state.windshieldMode + '|' + state.sunroofType);
     updateQuoteHref();
   }
   /* ---------- quote link (owner's CRM quote form) ---------- */
@@ -633,7 +673,7 @@ function mount(root) {
     if (state.vin) p.set('vin', state.vin);
     p.set('body', state.body);
     const groups = current && current.body === state.body ? groupsPresent() : GROUP_KEYS;
-    const sent = [];   // shades that feed vlt: front/rear/back/sunroof, plus the windshield only in Full mode
+    const sent = [];   // shades that feed vlt: front/rear/back, the sunroof only when there is one, the windshield only in Full mode
     for (const g of GROUP_KEYS) {
       if (groups.indexOf(g) < 0) continue;
       const v = snapShade(state.vlt[g]);
@@ -643,9 +683,12 @@ function mount(root) {
         else if (state.windshieldMode === 'strip') p.set(SUNSTRIP_PARAM, String(v));
         continue;
       }
+      if (g === 'sunroof' && state.sunroofType === 'none') continue;   // no sunroof: no shade, no vlt share
       p.set(g, v + '%'); sent.push(v);
+      if (g === 'sunroof') p.set(SUNROOF_TYPE_PARAM, state.sunroofType);
     }
     // vlt only when the windshield is Clear, so the CRM can never read it as including the windshield
+    if (!p.has(SUNROOF_TYPE_PARAM)) p.set(SUNROOF_TYPE_PARAM, 'none');   // no sunroof picked (or none on this body)
     if (state.windshieldMode === 'none' && sent.length && sent.every((v) => v === sent[0])) p.set('vlt', String(sent[0]));
     for (const [k, v] of QUOTE_FIXED) p.set(k, v);
     return p;
@@ -664,6 +707,7 @@ function mount(root) {
     v = clampVLT(v);
     if (g === 'all') for (const k of GROUP_KEYS) state.vlt[k] = v; else state.vlt[g] = v;
     if (g === 'windshield' && state.windshieldMode === 'none') state.windshieldMode = 'strip';
+    if (g === 'sunroof' && state.sunroofType === 'none') state.sunroofType = 'normal';   // a sunroof shade implies a sunroof
     paintGlass(); syncTintUI();
   }
   function selectGroup(g) {
@@ -676,6 +720,23 @@ function mount(root) {
     }
   }
   function setWindshieldMode(m) { state.windshieldMode = m; paintGlass(); syncTintUI(); }
+  let srFellBack = false;
+  function setSunroofType(t, byUser) {
+    if (!SUNROOF_TYPES.some(([k]) => k === t)) return;
+    if (t === 'model_x_panoramic' && !isModelX(state.make, state.model)) t = 'panoramic';
+    state.sunroofType = t; srFellBack = false;
+    if (byUser) state.sunroofTypeByUser = true;
+    paintGlass(); syncTintUI();
+  }
+  // vehicle changed: Model X panoramic only exists on a Tesla Model X
+  function syncSunroofToVehicle() {
+    const mx = isModelX(state.make, state.model);
+    if (!mx && state.sunroofType === 'model_x_panoramic') { state.sunroofType = 'panoramic'; srFellBack = true; }
+    // preselect unless they chose a type (a Model X choice we only swapped out for a vehicle change comes back)
+    else if (mx && (!state.sunroofTypeByUser || (srFellBack && state.sunroofType === 'panoramic'))) state.sunroofType = 'model_x_panoramic';
+    if (mx) srFellBack = false;
+    paintGlass(); syncTintUI();
+  }
   slider.addEventListener('input', () => setTint(state.group, slider.value));
 
   /* ---------- body ---------- */
@@ -690,7 +751,7 @@ function mount(root) {
     const name = [state.year, state.make, state.model].filter(Boolean).join(' ');
     vehLabel.textContent = name || BODY_LABEL[state.body];
     vehNote.textContent = name ? 'Shown as: ' + BODY_LABEL[state.body] : 'Pick your vehicle, or choose a body type';
-    updateQuoteHref();
+    syncSunroofToVehicle();
   }
   function updateBodyNote(text) {
     if (text != null) { bodyNote.textContent = text; return; }
@@ -726,7 +787,7 @@ function mount(root) {
   makeSel.addEventListener('change', () => { state.make = makeSel.value; state.model = ''; if (state.make) loadModelList(); else resetModels(); updateVehLabel(); });
   function resetModels() {
     modelSel.textContent = ''; modelSel.append(h('option', { value: '' }, 'Model')); modelSel.disabled = true; state.model = '';
-    updateQuoteHref();
+    syncSunroofToVehicle();
   }
   async function loadModelList() {
     const year = state.year, make = state.make;
@@ -823,7 +884,12 @@ function mount(root) {
   /* ---------- public API (handy for testing / site scripts) ---------- */
   Object.assign(api, {
     build: CTV_BUILD, stripFraction: STRIP_FRACTION,
-    state, setBody, setTint, selectGroup, setWindshieldMode,
+    state, setBody, setTint, selectGroup, setWindshieldMode, setSunroofType: (t) => setSunroofType(t, true),
+    sunroofInfo: () => ({ type: state.sunroofType, byUser: state.sunroofTypeByUser, modelXOption: !srTypeBtns.model_x_panoramic.hidden,
+      options: SUNROOF_TYPES.map(([k]) => k).filter((k) => !srTypeBtns[k].hidden),
+      opacity: current && current.panes.glass_sunroof ? +current.panes.glass_sunroof.material.opacity.toFixed(3) : null,
+      glassVisible: current && current.panes.glass_sunroof ? current.panes.glass_sunroof.visible : null,
+      coverVisible: current && current.srCover ? current.srCover.visible : null }),
     quoteHref: () => cta.href, quoteParams: () => Object.fromEntries(quoteParams()),
     bodyFromBodyClass, inferBodyClass,
     ready: () => (root.getAttribute('data-state') === 'ready' ? Promise.resolve(state.body) : new Promise((r) => readyResolvers.push(r))),

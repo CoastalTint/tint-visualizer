@@ -59,24 +59,35 @@ The "Get a quote" `href` is rebuilt on every vehicle, VIN, body type, window-gro
 | `year`, `make`, `model` | each one that is picked | e.g. `2019`, `Ford`, `F-150` |
 | `vin` | a VIN (11–17 chars; partial VINs with `*` are allowed) is typed | e.g. `1FTEW1E54KFA12345` |
 | `body` | always | `sedan`, `coupe`, `hatchback`, `suv`, `truck` or `van` |
-| `front`, `rear`, `back`, `sunroof` | each window group the model has (all six models have all four), including untouched defaults | a CRM shade with `%`: `5%`, `15%`, `20%`, `35%`, `50%` or `75%`. `rear` covers the rear doors and quarters. |
+| `front`, `rear`, `back` | each window group the model has (all six models have all three), including untouched defaults | a CRM shade with `%`: `5%`, `15%`, `20%`, `35%`, `50%` or `75%`. `rear` covers the rear doors and quarters. |
+| `sunroof` | only when the sunroof type is **Normal**, **Panoramic** or **Model X panoramic** (never with **No sunroof**, the default) | the sunroof shade with `%`, e.g. `35%` |
+| `sunroof_type` | always | `none` (default), `normal`, `panoramic` or `model_x_panoramic`. The CRM prices these as Normal $100, Panoramic $250 and Tesla Model X panoramic incl. the falcon-door tops $350. |
 | `windshield` | only when the windshield mode is **Full** | the chosen shade with `%`. The CRM bills a numeric windshield value as the full-windshield add-on. |
 | `vlt_sunstrip` | only when the windshield mode is **Top strip** | the strip shade as a bare number, e.g. `15` (the CRM's sun-strip add-on) |
 | *(none)* | windshield mode **Clear** (the default) | neither `windshield` nor `vlt_sunstrip` is sent, so no windshield charge |
-| `vlt` | only when the windshield is **Clear** and front, rear, back and sunroof all have the same shade (never sent with Top strip or Full) | that shade without `%`, e.g. `20` |
+| `vlt` | only when the windshield is **Clear** and all window shades that are sent (front, rear, back, plus sunroof when it has a type) are the same (never sent with Top strip or Full; with No sunroof the sunroof shade is ignored) | that shade without `%`, e.g. `20` |
 | `service` | always | `tint` |
 | `source` | always | `tint-visualizer` |
 | `utm_source`, `utm_medium`, `utm_campaign` | always | `website`, `visualizer`, `tint-visualizer` |
 
 **Shade snapping.** The CRM accepts only 5, 15, 20, 35, 50 and 75. The slider stays free-range (5–90%), so each window's current VLT is snapped to the nearest allowed shade when the link is built (ties go to the lighter shade); anything at or above 62% is sent as 75. Examples: 9→5, 10→15, 17→15, 18→20, 27→20, 28→35, 42→35, 43→50, 61→50, 62→75, 90→75. No `film` parameter is sent; the CRM defaults to Geoshield ProNano Ceramic.
 
-Example (2019 Ford F-150, Clear windshield, side and back windows 20%, then rear 5%):
+Example (2019 Ford F-150, Clear windshield, No sunroof, side and back windows 20%, then rear 5%):
 
 ```
-https://brightledger-deal-desk.lovable.app/quote?vehicle=2019+Ford+F-150&year=2019&make=Ford&model=F-150&body=truck&front=20%25&rear=5%25&back=20%25&sunroof=20%25&service=tint&source=tint-visualizer&utm_source=website&utm_medium=visualizer&utm_campaign=tint-visualizer
+https://brightledger-deal-desk.lovable.app/quote?vehicle=2019+Ford+F-150&year=2019&make=Ford&model=F-150&body=truck&front=20%25&rear=5%25&back=20%25&sunroof_type=none&service=tint&source=tint-visualizer&utm_source=website&utm_medium=visualizer&utm_campaign=tint-visualizer
 ```
 
-With the windshield Clear and all other windows at 20%, the link also has `vlt=20` (after `sunroof`).
+With the windshield Clear and all side and back windows at 20%, the link also has `vlt=20` (after `sunroof_type`).
+
+More examples (sedan, Clear windshield, side and back windows at the 35% default):
+
+```
+No sunroof (default): …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof_type=none&vlt=35&service=tint&…
+Normal, 20%:          …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=20%25&sunroof_type=normal&service=tint&…
+Panoramic, 35%:       …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=35%25&sunroof_type=panoramic&vlt=35&service=tint&…
+2017 Tesla Model X:   …/quote?vehicle=2017+Tesla+Model+X&year=2017&make=Tesla&model=Model+X&body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=35%25&sunroof_type=model_x_panoramic&vlt=35&service=tint&…
+```
 
 ## How it works
 
@@ -102,6 +113,11 @@ With the windshield Clear and all other windows at 20%, the link also has `vlt=2
   - Clear (default): no windshield tint and no windshield param in the quote link.
   - Top strip: a sun strip covering the top 25% of the windshield, measured along the glass down its centre line (about 8–9 inches on a real windshield), gets the chosen VLT and the rest stays clear. The same fraction is used on all six models. The strip's lower edge is a cut by a plane square to the glass (not an offset from the curved top edge), so it reads as a nearly straight line with only the gentle curve of the glass. It is done with a clipped clone of the pane.
   - Full: the whole windshield gets the chosen VLT.
+- **Sunroof type**: on the Sunroof tab, a row of small pills (styled like the windshield-mode pills) reads `Sunroof: No sunroof | Normal | Panoramic | Model X panoramic`. The row sits on the Sunroof tab only, so the desktop panel still fits a 1280×800 screen; on the All windows tab, the Sunroof tab label shows `none` until a type is chosen.
+  - No sunroof (default): the sunroof opening is covered with a body-paint panel, `sunroof_type=none` is sent with no `sunroof` shade, and the sunroof is left out of `vlt`. Picking a sunroof shade while on No sunroof switches the type to Normal.
+  - Normal / Panoramic / Model X panoramic: the glass shows the chosen VLT, and `sunroof=<shade>%` is sent with `sunroof_type`.
+  - Model X panoramic is offered only when the make is Tesla and the model matches `/model\s*x/i`. Picking a Model X preselects it, unless the customer already chose a sunroof type themselves. If the vehicle changes away from a Model X while it is selected, it falls back to Panoramic (and returns to Model X panoramic if a Model X is picked again).
+  - The All windows presets change the shade but never the sunroof type.
 - **Tint curve**: opacity = 1 − VLT/100 (max 0.97) on a dark tinted physical glass material, with reflections. Presets are 5/15/20/35/50/75%, matching the CRM's shades; the slider goes 5–90%.
 - **vPIC**: makes come from a built-in popular list plus all makes from `GetMakesForVehicleType`. Models come from `GetModelsForMakeYear` for vehicle types car, MPV and truck. Those endpoints return a vehicle *type*, not a BodyClass, so a model-name heuristic turns them into a vPIC-style BodyClass:
   - truck → Pickup
@@ -120,10 +136,12 @@ With the windshield Clear and all other windows at 20%, the link also has `vlt=2
 - `setBody('suv')`
 - `setTint('all'|'windshield'|'front'|'rear'|'back'|'sunroof', vlt)`
 - `setWindshieldMode('strip'|'full'|'none')`
+- `setSunroofType('none'|'normal'|'panoramic'|'model_x_panoramic')` (counts as the customer's choice; `model_x_panoramic` is refused on a non-Model X and becomes Panoramic)
 - `selectGroup(g)`
 - `panes()`
 - `paneInfo()`
 - `windshieldInfo()`
+- `sunroofInfo()` → `{ type, byUser, modelXOption, options, opacity, glassVisible, coverVisible }`
 - `cachedBodies()`
 - `setAutoRotate(bool)`
 - `cameraAzimuth()`
@@ -153,7 +171,7 @@ The script verifies that every mesh and material name is still present.
 cd tint-visualizer-dist && python3 -m http.server 8765
 # open http://127.0.0.1:8765/index.html
 node /workspace/tv-build/test.mjs      # main Playwright suite -> tv-build/test-results.json
-node /workspace/tv-build/quote.mjs     # quote link (F-150, SUV + sunroof, snapping, /contact/) -> quote-results.json
+node /workspace/tv-build/quote.mjs     # quote link (F-150, SUV + sunroof, snapping, /contact/, v8 sunroof types, 2017 Tesla Model X) -> quote-results.json
 node /workspace/tv-build/v2layout.mjs  # desktop/mobile sticky layout + v2-*.png screenshots
 node /workspace/tv-build/strip.mjs     # windshield strip screenshots strip-<model>-top/front34.png
 ```
