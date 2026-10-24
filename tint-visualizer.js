@@ -72,7 +72,7 @@ const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
 // the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
 const STRIP_FRACTION = 0.25;
-const CTV_BUILD = 'v8-sunroof-type';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+const CTV_BUILD = 'v8.1-modelx-suv';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
 // Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
 // and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
 const STRIP_SHOW_MAX_VLT = 15;
@@ -815,7 +815,9 @@ function mount(root) {
     if (!m || modelSel.value === '') { state.model = ''; updateVehLabel(); return; }
     state.model = m.name;
     const obj = Object.assign(new String(m.name), { vtypes: m.vtypes });
-    const inf = inferBodyClass(obj, m.vtype);
+    let inf = inferBodyClass(obj, m.vtype);
+    // v8.1: vPIC lists the Tesla Model X as a passenger car (-> sedan); it is an SUV. Model X only; other Teslas unchanged.
+    if (isModelX(state.make, m.name)) inf = { bodyClass: 'Sport Utility Vehicle (SUV)/Multi-Purpose Vehicle (MPV)', why: 'Tesla Model X is an SUV' };
     const body = bodyFromBodyClass(inf.bodyClass);
     state.bodyClass = inf.bodyClass; state.bodySource = 'vpic';
     const multi = RX_MULTI.test(m.name.toLowerCase()) && m.vtype === 'car';

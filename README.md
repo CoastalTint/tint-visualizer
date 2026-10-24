@@ -86,7 +86,7 @@ More examples (sedan, Clear windshield, side and back windows at the 35% default
 No sunroof (default): …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof_type=none&vlt=35&service=tint&…
 Normal, 20%:          …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=20%25&sunroof_type=normal&service=tint&…
 Panoramic, 35%:       …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=35%25&sunroof_type=panoramic&vlt=35&service=tint&…
-2017 Tesla Model X:   …/quote?vehicle=2017+Tesla+Model+X&year=2017&make=Tesla&model=Model+X&body=sedan&front=35%25&rear=35%25&back=35%25&sunroof=35%25&sunroof_type=model_x_panoramic&vlt=35&service=tint&…
+2017 Tesla Model X:   …/quote?vehicle=2017+Tesla+Model+X&year=2017&make=Tesla&model=Model+X&body=suv&front=35%25&rear=35%25&back=35%25&sunroof=35%25&sunroof_type=model_x_panoramic&vlt=35&service=tint&…
 ```
 
 ## How it works
@@ -116,6 +116,7 @@ Panoramic, 35%:       …/quote?body=sedan&front=35%25&rear=35%25&back=35%25&sun
 - **Sunroof type**: on the Sunroof tab, a row of small pills (styled like the windshield-mode pills) reads `Sunroof: No sunroof | Normal | Panoramic | Model X panoramic`. The row sits on the Sunroof tab only, so the desktop panel still fits a 1280×800 screen; on the All windows tab, the Sunroof tab label shows `none` until a type is chosen.
   - No sunroof (default): the sunroof opening is covered with a body-paint panel, `sunroof_type=none` is sent with no `sunroof` shade, and the sunroof is left out of `vlt`. Picking a sunroof shade while on No sunroof switches the type to Normal.
   - Normal / Panoramic / Model X panoramic: the glass shows the chosen VLT, and `sunroof=<shade>%` is sent with `sunroof_type`.
+  - A Tesla Model X picked in the vehicle dropdowns is shown as, and sent as, `body=suv` (vPIC lists it as a passenger car). Other Teslas keep their usual mapping.
   - Model X panoramic is offered only when the make is Tesla and the model matches `/model\s*x/i`. Picking a Model X preselects it, unless the customer already chose a sunroof type themselves. If the vehicle changes away from a Model X while it is selected, it falls back to Panoramic (and returns to Model X panoramic if a Model X is picked again).
   - The All windows presets change the shade but never the sunroof type.
 - **Tint curve**: opacity = 1 − VLT/100 (max 0.97) on a dark tinted physical glass material, with reflections. Presets are 5/15/20/35/50/75%, matching the CRM's shades; the slider goes 5–90%.
