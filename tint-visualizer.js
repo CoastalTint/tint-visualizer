@@ -63,7 +63,7 @@ const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
 // the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
 const STRIP_FRACTION = 0.25;
-const CTV_BUILD = 'v6-ws-params';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+const CTV_BUILD = 'v7-vlt-clear-only';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
 // Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
 // and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
 const STRIP_SHOW_MAX_VLT = 15;
@@ -645,7 +645,8 @@ function mount(root) {
       }
       p.set(g, v + '%'); sent.push(v);
     }
-    if (sent.length && sent.every((v) => v === sent[0])) p.set('vlt', String(sent[0]));
+    // vlt only when the windshield is Clear, so the CRM can never read it as including the windshield
+    if (state.windshieldMode === 'none' && sent.length && sent.every((v) => v === sent[0])) p.set('vlt', String(sent[0]));
     for (const [k, v] of QUOTE_FIXED) p.set(k, v);
     return p;
   }

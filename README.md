@@ -63,7 +63,7 @@ The "Get a quote" `href` is rebuilt on every vehicle, VIN, body type, window-gro
 | `windshield` | only when the windshield mode is **Full** | the chosen shade with `%`. The CRM bills a numeric windshield value as the full-windshield add-on. |
 | `vlt_sunstrip` | only when the windshield mode is **Top strip** | the strip shade as a bare number, e.g. `15` (the CRM's sun-strip add-on) |
 | *(none)* | windshield mode **Clear** (the default) | neither `windshield` nor `vlt_sunstrip` is sent, so no windshield charge |
-| `vlt` | front, rear, back and sunroof (plus the windshield in Full mode) all have the same shade | that shade without `%`, e.g. `20` |
+| `vlt` | only when the windshield is **Clear** and front, rear, back and sunroof all have the same shade (never sent with Top strip or Full) | that shade without `%`, e.g. `20` |
 | `service` | always | `tint` |
 | `source` | always | `tint-visualizer` |
 | `utm_source`, `utm_medium`, `utm_campaign` | always | `website`, `visualizer`, `tint-visualizer` |
@@ -76,7 +76,7 @@ Example (2019 Ford F-150, Clear windshield, side and back windows 20%, then rear
 https://brightledger-deal-desk.lovable.app/quote?vehicle=2019+Ford+F-150&year=2019&make=Ford&model=F-150&body=truck&front=20%25&rear=5%25&back=20%25&sunroof=20%25&service=tint&source=tint-visualizer&utm_source=website&utm_medium=visualizer&utm_campaign=tint-visualizer
 ```
 
-With all windows at 20% the same link also has `vlt=20` (after `sunroof`).
+With the windshield Clear and all other windows at 20%, the link also has `vlt=20` (after `sunroof`).
 
 ## How it works
 
