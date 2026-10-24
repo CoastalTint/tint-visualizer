@@ -6,8 +6,9 @@
  * Optional data attributes on the mount div:
  *   data-asset-base   folder that holds sedan.glb … van.glb (default: ./models/ next to this file)
  *   data-quote-url    CTA link (default: /contact/). The customer's selection is appended as query
- *                     params (vehicle, year, make, model, vin, body, windshield, front, rear, back,
- *                     sunroof, vlt when all match, service=tint, source=tint-visualizer, utm_*);
+ *                     params (vehicle, year, make, model, vin, body, windshield (Full mode only),
+ *                     vlt_sunstrip (Top strip mode only), front, rear, back, sunroof, vlt when all sent
+ *                     window shades match, service=tint, source=tint-visualizer, utm_*);
  *                     shades are snapped to the CRM's 5/15/20/35/50/75. A different-origin URL
  *                     opens in a new tab.
  *   data-sticky-top   px height of the site's fixed header (default: measured from the page)
@@ -53,12 +54,16 @@ function snapShade(v) {
   for (const s of CRM_SHADES) if (Math.abs(s - v) <= Math.abs(best - v)) best = s;
   return best;
 }
+// Windshield in the quote link (confirmed with the CRM). Any numeric `windshield` param is billed as a
+// full-windshield add-on, so it is sent ONLY in Full mode. Top strip mode sends this param instead, with the
+// snapped strip shade as a bare number (e.g. vlt_sunstrip=15). Clear mode sends neither.
+const SUNSTRIP_PARAM = 'vlt_sunstrip';
 const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
   ['utm_source', 'website'], ['utm_medium', 'visualizer'], ['utm_campaign', 'tint-visualizer']];
 // Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
 // the same for every body. 0.25 ~ an 8-9 in strip on a typical 32-36 in windshield.
 const STRIP_FRACTION = 0.25;
-const CTV_BUILD = 'v5-strip-visible';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
+const CTV_BUILD = 'v6-ws-params';   // read back at runtime (CoastalTintVisualizer.build) to confirm which copy a page loaded
 // Display only: the strip is never drawn lighter than this VLT, so it still reads as a band over a clear windshield
 // and next to 35-50% sides. The chosen shade (and what goes to the CRM) is unchanged.
 const STRIP_SHOW_MAX_VLT = 15;
@@ -212,7 +217,7 @@ function mount(root) {
   const autoRotate = root.getAttribute('data-autorotate') !== 'false';
 
   const state = {
-    body: 'sedan', group: 'all', windshieldMode: 'strip',
+    body: 'sedan', group: 'all', windshieldMode: 'none',
     vlt: { windshield: DEFAULT_VLT, front: DEFAULT_VLT, rear: DEFAULT_VLT, back: DEFAULT_VLT, sunroof: DEFAULT_VLT },
     year: '', make: '', model: '', vin: '', bodyClass: '', bodySource: 'default',
   };
@@ -628,11 +633,16 @@ function mount(root) {
     if (state.vin) p.set('vin', state.vin);
     p.set('body', state.body);
     const groups = current && current.body === state.body ? groupsPresent() : GROUP_KEYS;
-    const sent = [];
+    const sent = [];   // shades that feed vlt: front/rear/back/sunroof, plus the windshield only in Full mode
     for (const g of GROUP_KEYS) {
       if (groups.indexOf(g) < 0) continue;
-      // a clear (untinted) windshield is sent as 75, the CRM's lightest shade
-      const v = g === 'windshield' && state.windshieldMode === 'none' ? 75 : snapShade(state.vlt[g]);
+      const v = snapShade(state.vlt[g]);
+      if (g === 'windshield') {
+        // full: windshield=<shade> (a full-windshield add-on in the CRM); strip: vlt_sunstrip=<shade>; clear: nothing
+        if (state.windshieldMode === 'full') { p.set('windshield', v + '%'); sent.push(v); }
+        else if (state.windshieldMode === 'strip') p.set(SUNSTRIP_PARAM, String(v));
+        continue;
+      }
       p.set(g, v + '%'); sent.push(v);
     }
     if (sent.length && sent.every((v) => v === sent[0])) p.set('vlt', String(sent[0]));

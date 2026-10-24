@@ -59,18 +59,21 @@ The "Get a quote" `href` is rebuilt on every vehicle, VIN, body type, window-gro
 | `year`, `make`, `model` | each one that is picked | e.g. `2019`, `Ford`, `F-150` |
 | `vin` | a VIN (11–17 chars; partial VINs with `*` are allowed) is typed | e.g. `1FTEW1E54KFA12345` |
 | `body` | always | `sedan`, `coupe`, `hatchback`, `suv`, `truck` or `van` |
-| `windshield`, `front`, `rear`, `back`, `sunroof` | each window group the model has (all six models have all five), including untouched defaults | a CRM shade with `%`: `5%`, `15%`, `20%`, `35%`, `50%` or `75%`. `rear` covers the rear doors and quarters. A clear windshield is sent as `75%`; strip and full windshield both send the chosen shade. |
-| `vlt` | all sent window groups have the same shade | that shade without `%`, e.g. `20` |
+| `front`, `rear`, `back`, `sunroof` | each window group the model has (all six models have all four), including untouched defaults | a CRM shade with `%`: `5%`, `15%`, `20%`, `35%`, `50%` or `75%`. `rear` covers the rear doors and quarters. |
+| `windshield` | only when the windshield mode is **Full** | the chosen shade with `%`. The CRM bills a numeric windshield value as the full-windshield add-on. |
+| `vlt_sunstrip` | only when the windshield mode is **Top strip** | the strip shade as a bare number, e.g. `15` (the CRM's sun-strip add-on) |
+| *(none)* | windshield mode **Clear** (the default) | neither `windshield` nor `vlt_sunstrip` is sent, so no windshield charge |
+| `vlt` | front, rear, back and sunroof (plus the windshield in Full mode) all have the same shade | that shade without `%`, e.g. `20` |
 | `service` | always | `tint` |
 | `source` | always | `tint-visualizer` |
 | `utm_source`, `utm_medium`, `utm_campaign` | always | `website`, `visualizer`, `tint-visualizer` |
 
 **Shade snapping.** The CRM accepts only 5, 15, 20, 35, 50 and 75. The slider stays free-range (5–90%), so each window's current VLT is snapped to the nearest allowed shade when the link is built (ties go to the lighter shade); anything at or above 62% is sent as 75. Examples: 9→5, 10→15, 17→15, 18→20, 27→20, 28→35, 42→35, 43→50, 61→50, 62→75, 90→75. No `film` parameter is sent; the CRM defaults to Geoshield ProNano Ceramic.
 
-Example (2019 Ford F-150, all windows 20%, then rear 5%):
+Example (2019 Ford F-150, Clear windshield, side and back windows 20%, then rear 5%):
 
 ```
-https://brightledger-deal-desk.lovable.app/quote?vehicle=2019+Ford+F-150&year=2019&make=Ford&model=F-150&body=truck&windshield=20%25&front=20%25&rear=5%25&back=20%25&sunroof=20%25&service=tint&source=tint-visualizer&utm_source=website&utm_medium=visualizer&utm_campaign=tint-visualizer
+https://brightledger-deal-desk.lovable.app/quote?vehicle=2019+Ford+F-150&year=2019&make=Ford&model=F-150&body=truck&front=20%25&rear=5%25&back=20%25&sunroof=20%25&service=tint&source=tint-visualizer&utm_source=website&utm_medium=visualizer&utm_campaign=tint-visualizer
 ```
 
 With all windows at 20% the same link also has `vlt=20` (after `sunroof`).
@@ -96,9 +99,9 @@ With all windows at 20% the same link also has `vlt=20` (after `sunroof`).
 
   Tabs for groups a model lacks are hidden.
 - **Windshield** modes:
-  - Top strip (default): a sun strip covering the top 25% of the windshield, measured along the glass down its centre line (about 8–9 inches on a real windshield), gets the chosen VLT and the rest stays clear. The same fraction is used on all six models. The strip's lower edge is a cut by a plane square to the glass (not an offset from the curved top edge), so it reads as a nearly straight line with only the gentle curve of the glass. It is done with a clipped clone of the pane.
-  - Full.
-  - Clear.
+  - Clear (default): no windshield tint and no windshield param in the quote link.
+  - Top strip: a sun strip covering the top 25% of the windshield, measured along the glass down its centre line (about 8–9 inches on a real windshield), gets the chosen VLT and the rest stays clear. The same fraction is used on all six models. The strip's lower edge is a cut by a plane square to the glass (not an offset from the curved top edge), so it reads as a nearly straight line with only the gentle curve of the glass. It is done with a clipped clone of the pane.
+  - Full: the whole windshield gets the chosen VLT.
 - **Tint curve**: opacity = 1 − VLT/100 (max 0.97) on a dark tinted physical glass material, with reflections. Presets are 5/15/20/35/50/75%, matching the CRM's shades; the slider goes 5–90%.
 - **vPIC**: makes come from a built-in popular list plus all makes from `GetMakesForVehicleType`. Models come from `GetModelsForMakeYear` for vehicle types car, MPV and truck. Those endpoints return a vehicle *type*, not a BodyClass, so a model-name heuristic turns them into a vPIC-style BodyClass:
   - truck → Pickup
