@@ -5,7 +5,12 @@
  * three.js r170 is loaded on demand from jsDelivr (pinned). No inline JS is needed on the page.
  * Optional data attributes on the mount div:
  *   data-asset-base   folder that holds sedan.glb … van.glb (default: ./models/ next to this file)
- *   data-quote-url    CTA link (default: /contact/)
+ *   data-quote-url    CTA link (default: /contact/). The customer's selection is appended as query
+ *                     params (vehicle, year, make, model, vin, body, windshield, front, rear, back,
+ *                     sunroof, vlt when all match, service=tint, source=tint-visualizer, utm_*);
+ *                     shades are snapped to the CRM's 5/15/20/35/50/75. A different-origin URL
+ *                     opens in a new tab.
+ *   data-sticky-top   px height of the site's fixed header (default: measured from the page)
  *   data-autorotate   "false" to disable the idle turntable spin
  */
 const THREE_VER = '0.170.0';
@@ -34,9 +39,25 @@ const GROUPS = {
 const GROUP_KEYS = Object.keys(GROUPS);
 const ALL_PANES = [].concat(...Object.values(GROUPS));
 const GROUP_LABEL = { all: 'All windows', windshield: 'Windshield', front: 'Front sides', rear: 'Rear sides', back: 'Back glass', sunroof: 'Sunroof' };
-const PRESETS = [5, 15, 20, 35, 50, 70];
+const PRESETS = [5, 15, 20, 35, 50, 75];   // = the CRM's shades
 const VLT_MIN = 5, VLT_MAX = 90, CLEAR_VLT = 88, DEFAULT_VLT = 35;
-const STRIP_FRACTION = 0.13; // top share of the windshield height used for the visor strip
+const QUOTE_SOURCE = 'tint-visualizer';
+// The CRM /quote form only takes these shades. Each window's VLT is snapped to the nearest one (ties go lighter);
+// anything at or above 62% is sent as 75. The slider itself stays free-range.
+const CRM_SHADES = [5, 15, 20, 35, 50, 75];
+const CRM_LIGHT_CUTOFF = 62;
+function snapShade(v) {
+  v = Number(v);
+  if (!isFinite(v) || v >= CRM_LIGHT_CUTOFF) return 75;
+  let best = CRM_SHADES[0];
+  for (const s of CRM_SHADES) if (Math.abs(s - v) <= Math.abs(best - v)) best = s;
+  return best;
+}
+const QUOTE_FIXED = [['service', 'tint'], ['source', QUOTE_SOURCE],
+  ['utm_source', 'website'], ['utm_medium', 'visualizer'], ['utm_campaign', 'tint-visualizer']];
+// Windshield sun strip depth: one share of the windshield's centre-line length measured along the glass,
+// the same for every body. 0.16 ~ a 5-6 in strip on a typical 32-36 in windshield.
+const STRIP_FRACTION = 0.16;
 
 const POPULAR_MAKES = ['Acura', 'Audi', 'BMW', 'Buick', 'Cadillac', 'Chevrolet', 'Chrysler', 'Dodge', 'Ford', 'Genesis', 'GMC',
   'Honda', 'Hyundai', 'Infiniti', 'Jeep', 'Kia', 'Lexus', 'Lincoln', 'Mazda', 'Mercedes-Benz', 'Mini', 'Mitsubishi', 'Nissan',
@@ -181,7 +202,7 @@ function mount(root) {
   const state = {
     body: 'sedan', group: 'all', windshieldMode: 'strip',
     vlt: { windshield: DEFAULT_VLT, front: DEFAULT_VLT, rear: DEFAULT_VLT, back: DEFAULT_VLT, sunroof: DEFAULT_VLT },
-    year: '', make: '', model: '', bodyClass: '', bodySource: 'default',
+    year: '', make: '', model: '', vin: '', bodyClass: '', bodySource: 'default',
   };
 
   /* ---------- DOM ---------- */
@@ -197,6 +218,12 @@ function mount(root) {
   stage.append(h('div', { class: 'ctv-veh-wrap', 'aria-live': 'polite' }, vehLabel, vehNote), loader, hint, resetBtn);
 
   const cta = h('a', { class: 'ctv-cta', href: quoteUrl }, 'Get a quote');
+  let quoteBase, quoteExternal = false;
+  try {
+    quoteBase = new URL(quoteUrl, location.href);
+    quoteExternal = quoteBase.origin !== location.origin;
+  } catch (e) { quoteBase = null; }
+  if (quoteExternal) { cta.target = '_blank'; cta.rel = 'noopener'; }
 
   // vehicle section
   const yearSel = h('select', { class: 'ctv-select', 'aria-label': 'Year' });
@@ -432,14 +459,35 @@ function mount(root) {
     const w = panes.glass_windshield;
     if (w) {
       w.updateWorldMatrix(true, false);
-      const wb = new T.Box3().setFromObject(w);
-      const yCut = wb.max.y - (wb.max.y - wb.min.y) * STRIP_FRACTION;
+      // Cut plane for the sun strip. Its normal is the glass's own "up the windshield" direction, taken from the
+      // centre line (bottom-centre -> top-centre, no sideways component). A plane square to the glass gives a
+      // nearly straight lower edge across the pane (a horizontal cut, or an offset of the curved top edge, bends
+      // with the glass), and depth measured along the glass makes upright truck/van glass get the same strip.
+      const pos = w.geometry.attributes.position, v = new T.Vector3(), pts = [];
+      let minX = Infinity, maxX = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(w.matrixWorld); pts.push(v.clone());
+        minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+      }
+      const midX = (minX + maxX) / 2, band = (maxX - minX) * 0.08;
+      let top = null, bot = null;
+      for (const q of pts) {
+        if (Math.abs(q.x - midX) > band) continue;
+        if (!top || q.y > top.y) top = q;
+        if (!bot || q.y < bot.y) bot = q;
+      }
+      if (!top || !bot || top.y - bot.y < 1e-3) { const wb = new T.Box3().setFromObject(w); top = new T.Vector3(midX, wb.max.y, wb.min.z); bot = new T.Vector3(midX, wb.min.y, wb.max.z); }
+      const up = new T.Vector3(0, top.y - bot.y, top.z - bot.z);
+      const glassLen = up.length(); up.normalize();
+      const depth = glassLen * STRIP_FRACTION;
+      const cut = up.dot(top) - depth;                     // keep up . p > cut
       const strip = new T.Mesh(w.geometry, w.material.clone());
       strip.name = 'glass_windshield_strip';
       strip.renderOrder = 3; strip.castShadow = false;
-      strip.material.clippingPlanes = [new T.Plane(new T.Vector3(0, 1, 0), -yCut)];   // keep y > yCut
+      strip.material.clippingPlanes = [new T.Plane(up.clone(), -cut)];
       w.add(strip);   // same transform as the windshield (geometry is local to it)
-      entry.ws = { main: w, strip, belowPlane: new T.Plane(new T.Vector3(0, -1, 0), yCut), yCut };
+      entry.ws = { main: w, strip, belowPlane: new T.Plane(up.clone().negate(), cut),
+        cut: { fraction: STRIP_FRACTION, glassLen: +glassLen.toFixed(3), depth: +depth.toFixed(3), normal: up.toArray().map((n) => +n.toFixed(3)) } };
     }
     return entry;
   }
@@ -477,6 +525,7 @@ function mount(root) {
       fitLimits(entry, api._fitted ? true : 'reset'); api._fitted = true;
       updateGroupAvailability();
       paintGlass();
+      updateQuoteHref();
       loader.hidden = true;
       root.setAttribute('data-state', 'ready');
       root.setAttribute('data-body', body);
@@ -526,14 +575,55 @@ function mount(root) {
     for (const k in wsModeBtns) wsModeBtns[k].setAttribute('aria-pressed', String(k === state.windshieldMode));
     wsRow.hidden = !(state.group === 'windshield' || state.group === 'all');
     root.setAttribute('data-vlt', JSON.stringify(state.vlt) + '|' + state.windshieldMode);
+    updateQuoteHref();
   }
+  /* ---------- quote link (owner's CRM quote form) ---------- */
+  function quoteParams() {
+    const p = new URLSearchParams();
+    const veh = [state.year, state.make, state.model].filter(Boolean).join(' ');
+    if (veh) p.set('vehicle', veh);
+    if (state.year) p.set('year', state.year);
+    if (state.make) p.set('make', state.make);
+    if (state.model) p.set('model', state.model);
+    if (state.vin) p.set('vin', state.vin);
+    p.set('body', state.body);
+    const groups = current && current.body === state.body ? groupsPresent() : GROUP_KEYS;
+    const sent = [];
+    for (const g of GROUP_KEYS) {
+      if (groups.indexOf(g) < 0) continue;
+      // a clear (untinted) windshield is sent as 75, the CRM's lightest shade
+      const v = g === 'windshield' && state.windshieldMode === 'none' ? 75 : snapShade(state.vlt[g]);
+      p.set(g, v + '%'); sent.push(v);
+    }
+    if (sent.length && sent.every((v) => v === sent[0])) p.set('vlt', String(sent[0]));
+    for (const [k, v] of QUOTE_FIXED) p.set(k, v);
+    return p;
+  }
+  function updateQuoteHref() {
+    const p = quoteParams();
+    if (quoteBase) {
+      const u = new URL(quoteBase.href);
+      p.forEach((v, k) => u.searchParams.set(k, v));
+      cta.href = quoteExternal ? u.href : u.pathname + u.search + u.hash;
+    } else cta.href = quoteUrl + (quoteUrl.indexOf('?') >= 0 ? '&' : '?') + p;
+    root.setAttribute('data-quote-href', cta.getAttribute('href'));
+  }
+
   function setTint(g, v) {
     v = clampVLT(v);
     if (g === 'all') for (const k of GROUP_KEYS) state.vlt[k] = v; else state.vlt[g] = v;
     if (g === 'windshield' && state.windshieldMode === 'none') state.windshieldMode = 'strip';
     paintGlass(); syncTintUI();
   }
-  function selectGroup(g) { state.group = g; syncTintUI(); }
+  function selectGroup(g) {
+    state.group = g; syncTintUI();
+    // phones: keep the chosen tab visible in the horizontally scrolling row (horizontal only, never moves the page)
+    const b = groupBtns[g];
+    if (b && groupRow.scrollWidth > groupRow.clientWidth + 1) {
+      const rr = groupRow.getBoundingClientRect(), br = b.getBoundingClientRect();
+      if (br.left < rr.left || br.right > rr.right) groupRow.scrollTo({ left: groupRow.scrollLeft + br.left - rr.left - 8, behavior: 'smooth' });
+    }
+  }
   function setWindshieldMode(m) { state.windshieldMode = m; paintGlass(); syncTintUI(); }
   slider.addEventListener('input', () => setTint(state.group, slider.value));
 
@@ -549,6 +639,7 @@ function mount(root) {
     const name = [state.year, state.make, state.model].filter(Boolean).join(' ');
     vehLabel.textContent = name || BODY_LABEL[state.body];
     vehNote.textContent = name ? 'Shown as: ' + BODY_LABEL[state.body] : 'Pick your vehicle, or choose a body type';
+    updateQuoteHref();
   }
   function updateBodyNote(text) {
     if (text != null) { bodyNote.textContent = text; return; }
@@ -584,6 +675,7 @@ function mount(root) {
   makeSel.addEventListener('change', () => { state.make = makeSel.value; state.model = ''; if (state.make) loadModelList(); else resetModels(); updateVehLabel(); });
   function resetModels() {
     modelSel.textContent = ''; modelSel.append(h('option', { value: '' }, 'Model')); modelSel.disabled = true; state.model = '';
+    updateQuoteHref();
   }
   async function loadModelList() {
     const year = state.year, make = state.make;
@@ -621,7 +713,8 @@ function mount(root) {
   });
   async function vinLookup() {
     const vin = vinInput.value.trim().toUpperCase();
-    if (!/^[A-HJ-NPR-Z0-9*]{11,17}$/.test(vin)) { vinMsg.textContent = 'Enter the 17-character VIN (no I, O or Q).'; return; }
+    state.vin = /^[A-HJ-NPR-Z0-9*]{11,17}$/.test(vin) ? vin : '';
+    if (!state.vin) { updateQuoteHref(); vinMsg.textContent = 'Enter the 17-character VIN (no I, O or Q).'; return; }
     vinMsg.textContent = 'Looking up…';
     try {
       const r = await decodeVin(vin);
@@ -635,24 +728,68 @@ function mount(root) {
       setBody(body);
     } catch (e) { vinMsg.textContent = 'VIN lookup isn’t available right now. Pick your body type above.'; }
   }
+  vinInput.addEventListener('input', () => {
+    const v = vinInput.value.trim().toUpperCase();
+    state.vin = /^[A-HJ-NPR-Z0-9*]{11,17}$/.test(v) ? v : '';
+    updateQuoteHref();
+  });
   vinBtn.addEventListener('click', vinLookup);
   vinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); vinLookup(); } });
+
+  /* ---------- fixed/sticky site header: sets --ctv-sticky-top (sticky car on phones, scroll-margin) ---------- */
+  function measureStickyTop() {
+    const forced = root.getAttribute('data-sticky-top');
+    if (forced != null && forced !== '' && !isNaN(+forced)) { root.style.setProperty('--ctv-sticky-top', Math.max(0, +forced) + 'px'); return; }
+    if (!document.elementsFromPoint) return;
+    let bottom = 0;
+    for (let pass = 0; pass < 3; pass++) {      // stacked bars, e.g. WP admin bar + theme header
+      let found = 0;
+      for (const el of document.elementsFromPoint(innerWidth / 2, bottom + 1)) {
+        if (root.contains(el)) continue;
+        for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+          const pos = getComputedStyle(n).position;
+          if (pos !== 'fixed' && pos !== 'sticky') continue;
+          const r = n.getBoundingClientRect();
+          if (r.top <= bottom + 1 && r.bottom > bottom && r.height < innerHeight * 0.4) found = Math.max(found, r.bottom);
+          break;
+        }
+      }
+      if (!found) break;
+      bottom = found;
+    }
+    if (bottom > 0) root.style.setProperty('--ctv-sticky-top', Math.round(bottom) + 'px');
+    else root.style.removeProperty('--ctv-sticky-top');   // CSS fallback (90px desktop / 70px phones)
+    root.setAttribute('data-sticky-top-measured', String(Math.round(bottom)));
+  }
+  let stickyT = 0;
+  const remeasure = () => { clearTimeout(stickyT); stickyT = setTimeout(measureStickyTop, 150); };
+  measureStickyTop();
+  window.addEventListener('resize', remeasure);
+  window.addEventListener('load', measureStickyTop);
 
   resetBtn.addEventListener('click', () => { if (current && controls) { fitLimits(current, 'reset'); dirty = true; } });
 
   /* ---------- public API (handy for testing / site scripts) ---------- */
   Object.assign(api, {
     state, setBody, setTint, selectGroup, setWindshieldMode,
+    quoteHref: () => cta.href, quoteParams: () => Object.fromEntries(quoteParams()),
     bodyFromBodyClass, inferBodyClass,
     ready: () => (root.getAttribute('data-state') === 'ready' ? Promise.resolve(state.body) : new Promise((r) => readyResolvers.push(r))),
     panes: () => Object.keys(panesNow()),
     paneInfo: () => Object.fromEntries(Object.entries(panesNow()).map(([n, o]) => [n, { opacity: +o.material.opacity.toFixed(3), visible: o.visible }])),
     windshieldInfo: () => (current && current.ws ? { mode: state.windshieldMode, mainOpacity: +current.ws.main.material.opacity.toFixed(3),
-      stripOpacity: +current.ws.strip.material.opacity.toFixed(3), stripVisible: current.ws.strip.visible, yCut: current.ws.yCut } : null),
+      stripOpacity: +current.ws.strip.material.opacity.toFixed(3), stripVisible: current.ws.strip.visible, cut: current.ws.cut } : null),
     cachedBodies: () => [...modelCache.keys()],
     setAutoRotate: (on) => { if (controls) controls.autoRotate = !!on; },
     cameraAzimuth: () => (controls ? +controls.getAzimuthalAngle().toFixed(4) : null),
     cameraDistance: () => (controls ? +controls.getDistance().toFixed(3) : null),
+    setView: (azimuth, polar, dist) => {           // radians; azimuth 0 = from the front (+z), polar 0 = straight down
+      if (!controls) return;
+      const d = dist || controls.getDistance();
+      const p = Math.max(controls.minPolarAngle, Math.min(controls.maxPolarAngle, polar));
+      camera.position.copy(controls.target).add(new T.Vector3().setFromSphericalCoords(d, p, azimuth));
+      controls.autoRotate = false; controls.update(); dirty = true;
+    },
   });
   root.__ctv = api;
 
